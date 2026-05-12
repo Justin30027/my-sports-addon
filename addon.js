@@ -1,110 +1,129 @@
 const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 
+const BASE = "https://streamed.pk";
+
 const manifest = {
-    id: "com.justin.ppv.sports",
+    id: "com.justin.streamed.sports",
     version: "1.0.0",
-    name: "Justin PPV Sports",
-    description: "PPV.to sports catalog",
-    resources: ["catalog", "stream", "meta"],
+    name: "Justin Sports",
+    description: "Live sports from Streamed.pk",
+    resources: ["catalog", "meta", "stream"],
     types: ["movie"],
     catalogs: [
         {
             type: "movie",
-            id: "ppv-live",
-            name: "PPV Live Sports"
+            id: "streamed-live",
+            name: "Live Sports"
         }
     ]
 };
 
 const builder = new addonBuilder(manifest);
 
-async function getPPVStreams() {
-    const response = await fetch("https://api.ppv.to/api/streams");
-    const data = await response.json();
-
-    if (!data || !data.success || !Array.isArray(data.streams)) {
-        return [];
-    }
-
-    const allStreams = [];
-
-    for (const category of data.streams) {
-        if (!category.streams) continue;
-
-        for (const stream of category.streams) {
-            allStreams.push({
-                ...stream,
-                category: category.category
-            });
-        }
-    }
-
-    return allStreams;
+async function getMatches() {
+    const response = await fetch(`${BASE}/api/matches/live`);
+    return await response.json();
 }
 
-function makeId(stream) {
-    return "ppv_" + stream.id;
+function getPoster(match) {
+    if (match.poster) {
+        if (match.poster.startsWith("http")) return match.poster;
+        if (match.poster.startsWith("/")) return `${BASE}${match.poster}.webp`;
+        return `${BASE}/api/images/proxy/${match.poster}.webp`;
+    }
+
+    if (match.teams?.home?.badge && match.teams?.away?.badge) {
+        return `${BASE}/api/images/poster/${match.teams.home.badge}/${match.teams.away.badge}.webp`;
+    }
+
+    return "https://via.placeholder.com/500x281.png?text=Live+Sports";
+}
+
+function makeId(match) {
+    return "streamed_" + match.id;
+}
+
+function cleanId(id) {
+    return id.replace("streamed_", "");
+}
+
+function isPlayable(url) {
+    if (!url) return false;
+    return url.includes(".m3u8") || url.includes(".mpd") || url.includes(".mp4");
 }
 
 builder.defineCatalogHandler(async () => {
-    const streams = await getPPVStreams();
+    const matches = await getMatches();
 
-    const metas = streams.map(stream => ({
-        id: makeId(stream),
+    const metas = matches.map(match => ({
+        id: makeId(match),
         type: "movie",
-        name: stream.name,
-        poster: stream.poster || "https://via.placeholder.com/500x281.png?text=PPV+Sports",
-        background: stream.poster || "https://via.placeholder.com/500x281.png?text=PPV+Sports",
-        description: `${stream.category_name || stream.category || "Sports"}${stream.tag ? " | " + stream.tag : ""}`
+        name: match.title,
+        poster: getPoster(match),
+        background: getPoster(match),
+        description: `${match.category || "Sports"} | ${new Date(match.date).toLocaleString()}`
     }));
 
     return { metas };
 });
 
 builder.defineMetaHandler(async ({ id }) => {
-    const streams = await getPPVStreams();
-    const realId = id.replace("ppv_", "");
+    const matches = await getMatches();
+    const realId = cleanId(id);
 
-    const stream = streams.find(s => String(s.id) === realId);
+    const match = matches.find(m => String(m.id) === realId);
 
-    if (!stream) {
+    if (!match) {
         return { meta: null };
     }
 
     return {
         meta: {
-            id: makeId(stream),
+            id: makeId(match),
             type: "movie",
-            name: stream.name,
-            poster: stream.poster || "https://via.placeholder.com/500x281.png?text=PPV+Sports",
-            background: stream.poster || "https://via.placeholder.com/500x281.png?text=PPV+Sports",
-            description: `${stream.category_name || stream.category || "Sports"}${stream.tag ? " | " + stream.tag : ""}`
+            name: match.title,
+            poster: getPoster(match),
+            background: getPoster(match),
+            description: `${match.category || "Sports"} | ${new Date(match.date).toLocaleString()}`
         }
     };
 });
 
 builder.defineStreamHandler(async ({ id }) => {
-    const streams = await getPPVStreams();
-    const realId = id.replace("ppv_", "");
+    const matches = await getMatches();
+    const realId = cleanId(id);
 
-    const stream = streams.find(s => String(s.id) === realId);
+    const match = matches.find(m => String(m.id) === realId);
 
-    if (!stream) {
+    if (!match || !match.sources || match.sources.length === 0) {
         return { streams: [] };
     }
 
-    return {
-        streams: [
-            {
-                title: stream.tag || stream.category_name || "PPV.to",
-                externalUrl: `https://ppv.to/live/${stream.uri_name}`
+    let stremioStreams = [];
+
+    for (const source of match.sources) {
+        try {
+            const response = await fetch(`${BASE}/api/stream/${source.source}/${source.id}`);
+            const streams = await response.json();
+
+            for (const stream of streams) {
+                if (isPlayable(stream.embedUrl)) {
+                    stremioStreams.push({
+                        title: `${stream.source} | Stream ${stream.streamNo} | ${stream.language} | ${stream.hd ? "HD" : "SD"}`,
+                        url: stream.embedUrl
+                    });
+                }
             }
-        ]
-    };
+        } catch (err) {
+            console.log("Stream source failed:", source.source);
+        }
+    }
+
+    return { streams: stremioStreams };
 });
 
 const port = process.env.PORT || 7000;
 
 serveHTTP(builder.getInterface(), { port });
 
-console.log("PPV addon running on port " + port);
+console.log("Justin Sports Streamed addon running on port " + port);

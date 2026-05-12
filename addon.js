@@ -5,41 +5,55 @@ const manifest = {
     version: "1.0.0",
     name: "Justin Sports",
     description: "My first sports addon",
-    resources: ["stream"],
+    resources: ["catalog", "stream"],
     types: ["tv"],
-    catalogs: [],
-    idPrefixes: ["sports"]
+    catalogs: [
+        {
+            type: "tv",
+            id: "live-sports",
+            name: "Live Sports"
+        }
+    ],
+    idPrefixes: ["wf_"]
 };
 
 const builder = new addonBuilder(manifest);
 
-builder.defineStreamHandler(async ({ id }) => {
-
+async function getMatches() {
     const response = await fetch("https://api.watchfooty.st/api/v1/matches/live");
+    return await response.json();
+}
 
-    const matches = await response.json();
+builder.defineCatalogHandler(async function(args) {
+    const matches = await getMatches();
 
-    let streams = [];
+    const metas = matches.map(match => ({
+        id: "wf_" + match.matchId,
+        type: "tv",
+        name: match.title,
+        poster: match.poster,
+        description: match.league || "Live sports match"
+    }));
 
-    for (const match of matches) {
+    return { metas };
+});
 
-        if (match.streams) {
+builder.defineStreamHandler(async function(args) {
+    const realId = args.id.replace("wf_", "");
+    const matches = await getMatches();
 
-            for (const stream of match.streams) {
+    const match = matches.find(m => m.matchId === realId);
 
-                streams.push({
-                    title: match.title + " | " + stream.quality,
-                    url: stream.url
-                });
-
-            }
-
-        }
-
+    if (!match || !match.streams) {
+        return { streams: [] };
     }
 
-    return { streams };
+    const streams = match.streams.map(stream => ({
+        title: `${match.title} | ${stream.quality} | ${stream.language}`,
+        url: stream.url
+    }));
 
+    return { streams };
 });
 
 const port = process.env.PORT || 7000;

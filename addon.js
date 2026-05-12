@@ -4,8 +4,8 @@ const manifest = {
     id: "com.justin.sports",
     version: "1.0.0",
     name: "Justin Sports",
-    description: "My first sports addon",
-    resources: ["catalog", "stream"],
+    description: "Watch live sports",
+    resources: ["catalog", "stream", "meta"],
     types: ["tv"],
     catalogs: [
         {
@@ -13,43 +13,65 @@ const manifest = {
             id: "live-sports",
             name: "Live Sports"
         }
-    ],
-    idPrefixes: ["wf_"]
+    ]
 };
 
 const builder = new addonBuilder(manifest);
 
 async function getMatches() {
     const response = await fetch("https://api.watchfooty.st/api/v1/matches/live");
+
     return await response.json();
 }
 
-builder.defineCatalogHandler(async function(args) {
+builder.defineCatalogHandler(async () => {
+
     const matches = await getMatches();
 
     const metas = matches.map(match => ({
-        id: "wf_" + match.matchId,
+        id: String(match.matchId),
         type: "tv",
         name: match.title,
         poster: match.poster,
-        description: match.league || "Live sports match"
+        posterShape: "landscape"
     }));
 
     return { metas };
 });
 
-builder.defineStreamHandler(async function(args) {
-    const realId = args.id.replace("wf_", "");
+builder.defineMetaHandler(async ({ id }) => {
+
     const matches = await getMatches();
 
-    const match = matches.find(m => m.matchId === realId);
+    const match = matches.find(m => String(m.matchId) === id);
+
+    if (!match) {
+        return { meta: null };
+    }
+
+    return {
+        meta: {
+            id: String(match.matchId),
+            type: "tv",
+            name: match.title,
+            poster: match.poster,
+            description: match.league || "Live sports"
+        }
+    };
+});
+
+builder.defineStreamHandler(async ({ id }) => {
+
+    const matches = await getMatches();
+
+    const match = matches.find(m => String(m.matchId) === id);
 
     if (!match || !match.streams) {
         return { streams: [] };
     }
 
     const streams = match.streams.map(stream => ({
-        title: `${match.title} | ${stream.quality} | ${stream.language}`,
+        title: `${stream.quality} ${stream.language}`,
         url: stream.url
     }));
 

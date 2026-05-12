@@ -49,7 +49,29 @@ function cleanId(id) {
 
 function isPlayable(url) {
     if (!url) return false;
-    return url.includes(".m3u8") || url.includes(".mpd") || url.includes(".mp4");
+
+    return (
+        url.includes(".m3u8") ||
+        url.includes(".mpd") ||
+        url.includes(".mp4") ||
+        url.includes("m3u8") ||
+        url.includes("mpd")
+    );
+}
+
+function getPlayableUrl(stream) {
+    return (
+        stream.url ||
+        stream.file ||
+        stream.link ||
+        stream.hls ||
+        stream.hlsUrl ||
+        stream.m3u8 ||
+        stream.m3u8Url ||
+        stream.streamUrl ||
+        stream.playbackUrl ||
+        stream.embedUrl
+    );
 }
 
 builder.defineCatalogHandler(async () => {
@@ -106,16 +128,23 @@ builder.defineStreamHandler(async ({ id }) => {
             const response = await fetch(`${BASE}/api/stream/${source.source}/${source.id}`);
             const streams = await response.json();
 
+            console.log("Source:", source.source, source.id);
+            console.log("Returned streams:", JSON.stringify(streams, null, 2));
+
             for (const stream of streams) {
-                if (isPlayable(stream.embedUrl)) {
+                const playableUrl = getPlayableUrl(stream);
+
+                console.log("Playable URL:", playableUrl);
+
+                if (isPlayable(playableUrl)) {
                     stremioStreams.push({
-                        title: `${stream.source} | Stream ${stream.streamNo} | ${stream.language} | ${stream.hd ? "HD" : "SD"}`,
-                        url: stream.embedUrl
+                        title: `${stream.source || source.source} | Stream ${stream.streamNo || ""} | ${stream.language || "Unknown"} | ${stream.hd ? "HD" : "SD"}`,
+                        url: playableUrl
                     });
                 }
             }
         } catch (err) {
-            console.log("Stream source failed:", source.source);
+            console.log("Stream source failed:", source.source, err.message);
         }
     }
 

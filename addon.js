@@ -1,85 +1,110 @@
 const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 
 const manifest = {
-    id: "com.justin.sports",
+    id: "com.justin.ppv.sports",
     version: "1.0.0",
-    name: "Justin Sports",
-    description: "Watch live sports",
+    name: "Justin PPV Sports",
+    description: "PPV.to sports catalog",
     resources: ["catalog", "stream", "meta"],
-    types: ["tv"],
+    types: ["movie"],
     catalogs: [
         {
-            type: "tv",
-            id: "live-sports",
-            name: "Live Sports"
+            type: "movie",
+            id: "ppv-live",
+            name: "PPV Live Sports"
         }
     ]
 };
 
 const builder = new addonBuilder(manifest);
 
-async function getMatches() {
-    const response = await fetch("https://api.watchfooty.st/api/v1/matches/live");
+async function getPPVStreams() {
+    const response = await fetch("https://api.ppv.to/api/streams");
+    const data = await response.json();
 
-    return await response.json();
+    if (!data || !data.success || !Array.isArray(data.streams)) {
+        return [];
+    }
+
+    const allStreams = [];
+
+    for (const category of data.streams) {
+        if (!category.streams) continue;
+
+        for (const stream of category.streams) {
+            allStreams.push({
+                ...stream,
+                category: category.category
+            });
+        }
+    }
+
+    return allStreams;
+}
+
+function makeId(stream) {
+    return "ppv_" + stream.id;
 }
 
 builder.defineCatalogHandler(async () => {
+    const streams = await getPPVStreams();
 
-    const matches = await getMatches();
-
-    const metas = matches.map(match => ({
-        id: String(match.matchId),
-        type: "tv",
-        name: match.title,
-        poster: match.poster,
-        posterShape: "landscape"
+    const metas = streams.map(stream => ({
+        id: makeId(stream),
+        type: "movie",
+        name: stream.name,
+        poster: stream.poster || "https://via.placeholder.com/500x281.png?text=PPV+Sports",
+        background: stream.poster || "https://via.placeholder.com/500x281.png?text=PPV+Sports",
+        description: `${stream.category_name || stream.category || "Sports"}${stream.tag ? " | " + stream.tag : ""}`
     }));
 
     return { metas };
 });
 
 builder.defineMetaHandler(async ({ id }) => {
+    const streams = await getPPVStreams();
+    const realId = id.replace("ppv_", "");
 
-    const matches = await getMatches();
+    const stream = streams.find(s => String(s.id) === realId);
 
-    const match = matches.find(m => String(m.matchId) === id);
-
-    if (!match) {
+    if (!stream) {
         return { meta: null };
     }
 
     return {
         meta: {
-            id: String(match.matchId),
-            type: "tv",
-            name: match.title,
-            poster: match.poster,
-            description: match.league || "Live sports"
+            id: makeId(stream),
+            type: "movie",
+            name: stream.name,
+            poster: stream.poster || "https://via.placeholder.com/500x281.png?text=PPV+Sports",
+            background: stream.poster || "https://via.placeholder.com/500x281.png?text=PPV+Sports",
+            description: `${stream.category_name || stream.category || "Sports"}${stream.tag ? " | " + stream.tag : ""}`
         }
     };
 });
 
 builder.defineStreamHandler(async ({ id }) => {
+    const streams = await getPPVStreams();
+    const realId = id.replace("ppv_", "");
 
-    const matches = await getMatches();
+    const stream = streams.find(s => String(s.id) === realId);
 
-    const match = matches.find(m => String(m.matchId) === id);
-
-    if (!match || !match.streams) {
+    if (!stream) {
         return { streams: [] };
     }
 
-    const streams = match.streams.map(stream => ({
-        title: `${stream.quality} ${stream.language}`,
-        url: stream.url
-    }));
-
-    return { streams };
+    return {
+        streams: [
+            {
+                title: stream.tag || stream.category_name || "PPV.to",
+                externalUrl: `https://ppv.to/live/${stream.uri_name}`
+            }
+        ]
+    };
 });
 
 const port = process.env.PORT || 7000;
 
 serveHTTP(builder.getInterface(), { port });
 
-console.log("Addon running on port " + port);
+console.log("PPV addon running on port " + port);
